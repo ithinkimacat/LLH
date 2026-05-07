@@ -9,6 +9,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/fireba
 import { getDatabase, ref, onValue, push, set, runTransaction, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
+// ——— CONFIG ———
 const firebaseConfig = {
   apiKey: "AIzaSyAwUCy0tqZmRKOreqQwQH-LVgizizhOkpg",
   authDomain: "large-language-human.firebaseapp.com",
@@ -19,6 +20,19 @@ const firebaseConfig = {
   appId: "1:571558141312:web:c55a561f5f07a06d6bf565"
 };
 
+// ——— STATE ———
+const state = {
+  currentUser: null,
+  hasVotedThisRound: false,
+  threshold: 5,
+  previousWordIds: new Set(),
+  hasLoaded: false,
+  dataLoaded: false,
+  isLight: false,
+  isOnline: null
+};
+
+// ——— FIREBASE ———
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 const auth = getAuth(app);
@@ -27,144 +41,171 @@ const sentenceRef = ref(db, "sentence");
 const candidatesRef = ref(db, "sentence/candidates");
 const wordsRef = ref(db, "sentence/words");
 const publishStateRef = ref(db, "sentence/publishState");
-
-let currentUser = null;
-let hasVotedThisRound = false;
-let threshold = 5;
-let previousWordIds = new Set();
-let hasLoaded = false;
+const connectedRef = ref(db, ".info/connected");
 
 signInAnonymously(auth).then((cred) => {
-  currentUser = cred.user;
-  document.getElementById("user-id").textContent = "You: " + currentUser.uid.slice(0, 6);
+  state.currentUser = cred.user;
+  dom.userId.textContent = "You: " + state.currentUser.uid.slice(0, 6);
 }).catch((err) => console.error("Auth failed", err));
 
-const questionEl = document.getElementById("question");
-const wordsEl = document.getElementById("tokens");
-const statusEl = document.getElementById("status");
-const candidatesListEl = document.getElementById("candidates-list");
-const contributorEl = document.getElementById("contributors");
-const themeBtn = document.getElementById("theme-btn");
-const aboutBtn = document.getElementById("about-btn");
-const aboutOverlay = document.getElementById("about-overlay");
-const closeAbout = document.getElementById("close-about");
+// ——— DOM REFS ———
+const dom = {
+  question: document.getElementById("question"),
+  words: document.getElementById("tokens"),
+  status: document.getElementById("status"),
+  candidatesList: document.getElementById("candidates-list"),
+  contributor: document.getElementById("contributors"),
+  userId: document.getElementById("user-id"),
+  themeBtn: document.getElementById("theme-btn"),
+  aboutBtn: document.getElementById("about-btn"),
+  aboutOverlay: document.getElementById("about-overlay"),
+  closeAbout: document.getElementById("close-about"),
+  connectionBanner: document.getElementById("connection-banner"),
+  toast: document.getElementById("toast")
+};
 
-let isLight = false;
-
+// ——— THEME ———
 function setTheme(light) {
-  isLight = light;
-  document.body.classList.toggle("light", isLight);
-  themeBtn.textContent = isLight ? "☾" : "☼";
+  state.isLight = light;
+  document.body.classList.toggle("light", state.isLight);
+  dom.themeBtn.textContent = state.isLight ? "☾" : "☼";
 }
 
-themeBtn.addEventListener("click", () => setTheme(!isLight));
+const prefersLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)');
+if (prefersLight && prefersLight.matches) setTheme(true);
+dom.themeBtn.addEventListener("click", () => setTheme(!state.isLight));
 
-aboutBtn.addEventListener("click", () => {
-  aboutOverlay.style.display = "flex";
+// ——— ABOUT ———
+dom.aboutBtn.addEventListener("click", () => { dom.aboutOverlay.style.display = "flex"; });
+dom.closeAbout.addEventListener("click", () => { dom.aboutOverlay.style.display = "none"; });
+dom.aboutOverlay.addEventListener("click", (e) => {
+  if (e.target === dom.aboutOverlay) dom.aboutOverlay.style.display = "none";
 });
 
-closeAbout.addEventListener("click", () => {
-  aboutOverlay.style.display = "none";
+// ——— CONNECTION ———
+onValue(connectedRef, (snap) => {
+  state.isOnline = snap.val() === true;
+  updateConnectionUI();
 });
 
-aboutOverlay.addEventListener("click", (e) => {
-  if (e.target === aboutOverlay) aboutOverlay.style.display = "none";
-});
+function updateConnectionUI() {
+  const banner = dom.connectionBanner;
+  if (state.isOnline === null) {
+    banner.textContent = "Connecting...";
+    banner.className = "connection-banner connecting";
+    banner.style.display = "block";
+  } else if (state.isOnline === false) {
+    banner.textContent = "Offline — reconnecting...";
+    banner.className = "connection-banner offline";
+    banner.style.display = "block";
+  } else {
+    banner.style.display = "none";
+  }
+}
 
+// ——— DATA LISTENER ———
 onValue(sentenceRef, (snapshot) => {
   const data = snapshot.val() || {};
-  questionEl.textContent = data.question || "Give me a recipe of a breakfast meal for 2 I could cook with 2 eggs, bread and a sausage.";
-  threshold = data.threshold || 5;
+  state.dataLoaded = true;
+  state.threshold = data.threshold || 5;
 
   const candidates = data.candidates || {};
   const words = data.words || {};
   const publishState = data.publishState || null;
 
-  // Auto-clear stale publishState (>10s) to recover from failed publish
+  // Auto-clear stale publishState (>10s)
   if (publishState && publishState.timestamp && Date.now() - publishState.timestamp >= 10000) {
     set(publishStateRef, null).catch(() => {});
   }
 
   // Check if user already voted this round
-  hasVotedThisRound = false;
+  state.hasVotedThisRound = false;
   for (const cand of Object.values(candidates)) {
-    if (cand.voters && cand.voters[currentUser?.uid]) {
-      hasVotedThisRound = true;
+    if (cand.voters && cand.voters[state.currentUser?.uid]) {
+      state.hasVotedThisRound = true;
       break;
     }
   }
 
-  // If candidates cleared (new round), reset vote flag visually
-  if (Object.keys(candidates).length === 0 && hasVotedThisRound) {
-    hasVotedThisRound = false;
+  if (Object.keys(candidates).length === 0 && state.hasVotedThisRound) {
+    state.hasVotedThisRound = false;
   }
 
-  renderWords(words);
+  // Question: show loading until data arrives
+  if (data.question) {
+    dom.question.textContent = data.question;
+  } else if (!state.dataLoaded) {
+    dom.question.textContent = "Loading question...";
+  } else {
+    dom.question.textContent = "Give me a recipe of a breakfast meal for 2 I could cook with 2 eggs, bread and a sausage.";
+  }
+
+  const participants = data.participants || {};
+  const participantCount = Object.keys(participants).length;
+
+  renderWords(words, participantCount);
   renderCandidates(candidates);
   checkAndPublish(candidates, publishState, words);
   updateStatus(candidates);
 });
 
-function renderWords(wordsObj) {
-  wordsEl.innerHTML = "";
+// ——— RENDER ———
+function renderWords(wordsObj, participantCount) {
+  dom.words.innerHTML = "";
   const entries = Object.entries(wordsObj).sort((a, b) => (a[1].timestamp || 0) - (b[1].timestamp || 0));
 
-  let totalContributors = 0;
   const currentIds = new Set();
 
-  if (entries.length === 0 && !hasLoaded) {
-    wordsEl.innerHTML = '<div class="spinner"></div>';
-    hasLoaded = true;
+  if (entries.length === 0 && !state.hasLoaded) {
+    dom.words.innerHTML = '';
+    state.hasLoaded = true;
     appendInlineInput();
-    contributorEl.textContent = "0 contributors";
+    dom.contributor.textContent = "0 people participated";
     return;
   }
-  hasLoaded = true;
+  state.hasLoaded = true;
 
   for (const [id, word] of entries) {
     currentIds.add(id);
-    totalContributors += word.authorCount || 1;
 
     const span = document.createElement("span");
     span.className = "word";
-    if (!previousWordIds.has(id)) {
+    if (!state.previousWordIds.has(id)) {
       span.classList.add("word-flash");
       setTimeout(() => span.classList.remove("word-flash"), 600);
     }
     span.textContent = word.text;
-    wordsEl.appendChild(span);
+    dom.words.appendChild(span);
 
-    // Add space after word
     const space = document.createElement("span");
     space.textContent = " ";
-    wordsEl.appendChild(space);
+    dom.words.appendChild(space);
   }
-  previousWordIds = currentIds;
+  state.previousWordIds = currentIds;
 
-  contributorEl.textContent = totalContributors + " votes cast";
-
+  dom.contributor.textContent = participantCount + " people participated";
   appendInlineInput();
 }
 
 function appendInlineInput() {
-  // Remove existing inline box if any
-  const existing = wordsEl.querySelector(".inline-box");
+  const existing = dom.words.querySelector(".inline-box");
   if (existing) existing.remove();
 
   const wrapper = document.createElement("span");
   wrapper.className = "inline-box";
   wrapper.innerHTML = `
-    <input type="text" id="token-input" maxlength="20" placeholder="${hasVotedThisRound ? 'Wait for next round...' : 'Type a word...'}" autocomplete="off" ${hasVotedThisRound ? 'disabled' : ''}>
-    <button id="submit-btn" ${hasVotedThisRound ? 'disabled' : ''}>→</button>
+    <input type="text" id="token-input" maxlength="20" placeholder="${state.hasVotedThisRound ? 'Wait...' : 'Type a word...'}" autocomplete="off" ${state.hasVotedThisRound ? 'disabled' : ''}>
+    <button id="submit-btn" ${state.hasVotedThisRound ? 'disabled' : ''}>→</button>
   `;
-  wordsEl.appendChild(wrapper);
+  dom.words.appendChild(wrapper);
 
   const newInput = wrapper.querySelector("#token-input");
   const newBtn = wrapper.querySelector("#submit-btn");
 
-  if (!hasVotedThisRound) {
+  if (!state.hasVotedThisRound) {
     newInput.addEventListener("keydown", (e) => {
       if (e.key === "Enter") submitWord();
+      if (e.key === " ") e.preventDefault();
     });
     newBtn.addEventListener("click", submitWord);
     setTimeout(() => newInput.focus(), 10);
@@ -172,82 +213,71 @@ function appendInlineInput() {
 }
 
 function renderCandidates(candidates) {
-  candidatesListEl.innerHTML = "";
+  dom.candidatesList.innerHTML = "";
   const entries = Object.entries(candidates).sort((a, b) => b[1].count - a[1].count);
   if (entries.length === 0) return;
 
   const label = document.createElement("div");
   label.className = "candidates-label";
-  label.textContent = "Voting:";
-  candidatesListEl.appendChild(label);
+  label.textContent = "Submissions:";
+  dom.candidatesList.appendChild(label);
 
   for (const [word, cand] of entries) {
     const tag = document.createElement("span");
     tag.className = "candidate-tag";
-    const pct = Math.min(100, Math.round((cand.count / threshold) * 100));
+    const pct = Math.min(100, Math.round((cand.count / state.threshold) * 100));
     tag.style.background = `linear-gradient(90deg, var(--accent) ${pct}%, transparent ${pct}%)`;
     tag.style.color = pct > 50 ? "var(--btn-text)" : "var(--text)";
-    tag.textContent = `${cand.text || word} ${cand.count}/${threshold}`;
-    candidatesListEl.appendChild(tag);
+    tag.textContent = `${cand.text || word} ${cand.count}/${state.threshold}`;
+    dom.candidatesList.appendChild(tag);
   }
 }
 
 function updateStatus(candidates) {
-  if (hasVotedThisRound) {
-    statusEl.textContent = "Prediction submitted — waiting for consensus...";
-    statusEl.className = "cooldown-bar cooling";
+  if (state.hasVotedThisRound) {
+    dom.status.textContent = "Prediction submitted — waiting for consensus...";
+    dom.status.className = "cooldown-bar cooling";
     return;
   }
 
   const entries = Object.entries(candidates);
   if (entries.length === 0) {
-    statusEl.textContent = "Submit the next word";
-    statusEl.className = "cooldown-bar ready";
+    dom.status.textContent = "Submit the next word";
+    dom.status.className = "cooldown-bar ready";
     return;
   }
 
   const top = entries.sort((a, b) => b[1].count - a[1].count)[0];
-  statusEl.textContent = `Leading: "${top[1].text || top[0]}" with ${top[1].count} votes`;
-  statusEl.className = "cooldown-bar ready";
+  dom.status.textContent = `Leading: "${top[1].text || top[0]}" with ${top[1].count} votes`;
+  dom.status.className = "cooldown-bar ready";
 }
 
+// ——— CONSENSUS PUBLISH ———
 function checkAndPublish(candidates, publishState, words) {
-  // If publishState is stale (>10s), ignore it — previous publish died
-  if (publishState && publishState.timestamp && Date.now() - publishState.timestamp < 10000) {
-    return;
-  }
-  // If publishState is stale, clear it so next check can proceed
+  if (publishState && publishState.timestamp && Date.now() - publishState.timestamp < 10000) return;
   if (publishState && publishState.timestamp && Date.now() - publishState.timestamp >= 10000) {
     set(publishStateRef, null).catch(() => {});
   }
 
-  // Check if any candidate already exists in words (already published)
   const existingTexts = new Set(Object.values(words || {}).map((w) => w.text?.toLowerCase()));
 
   for (const [word, cand] of Object.entries(candidates)) {
-    if (cand.count >= threshold && !existingTexts.has(word.toLowerCase())) {
-      if (!currentUser) return;
+    if (cand.count >= state.threshold && !existingTexts.has(word.toLowerCase())) {
+      if (!state.currentUser) return;
 
-      runTransaction(publishStateRef, (state) => {
-        if (!state) {
-          return { word: word, text: cand.text || word, timestamp: Date.now(), winner: currentUser.uid };
-        }
-        return state;
+      runTransaction(publishStateRef, (s) => {
+        if (!s) return { word, text: cand.text || word, timestamp: Date.now(), winner: state.currentUser.uid };
+        return s;
       }).then(async (result) => {
         const val = result.snapshot.val();
-        if (result.committed && val && val.winner === currentUser.uid) {
+        if (result.committed && val && val.winner === state.currentUser.uid) {
           try {
             const newWordRef = push(wordsRef);
-            await set(newWordRef, {
-              text: val.text,
-              timestamp: serverTimestamp(),
-              authorCount: cand.count
-            });
+            await set(newWordRef, { text: val.text, timestamp: serverTimestamp(), authorCount: cand.count });
             await set(candidatesRef, null);
             await set(publishStateRef, null);
           } catch (err) {
             console.error("Publish cleanup failed", err);
-            // Always clear publishState on error so we don't get stuck
             set(publishStateRef, null).catch(() => {});
           }
         }
@@ -260,6 +290,7 @@ function checkAndPublish(candidates, publishState, words) {
   }
 }
 
+// ——— ACTIONS ———
 function validateWord(text) {
   if (!text || text.length < 1 || text.length > 20) return "Word must be 1-20 characters.";
   if (!/^\S+$/.test(text)) return "Word must not contain spaces.";
@@ -270,9 +301,9 @@ async function submitWord() {
   const input = document.getElementById("token-input");
   const text = input.value.trim();
   const error = validateWord(text);
-  if (error) { alert(error); return; }
-  if (!currentUser) { alert("Not authenticated yet. Wait a moment."); return; }
-  if (hasVotedThisRound) { alert("You already voted this round. Wait for the next word to be published."); return; }
+  if (error) { showToast(error); return; }
+  if (!state.currentUser) { showToast("Not authenticated yet. Wait a moment."); return; }
+  if (state.hasVotedThisRound) { showToast("You already submitted. Wait for the next word."); return; }
 
   const word = text.toLowerCase();
   const candidateRef = ref(db, `sentence/candidates/${word}`);
@@ -280,29 +311,35 @@ async function submitWord() {
   try {
     const result = await runTransaction(candidateRef, (candidate) => {
       if (!candidate) {
-        return { count: 1, voters: { [currentUser.uid]: true }, text: text };
+        return { count: 1, voters: { [state.currentUser.uid]: true }, text };
       }
-      if (candidate.voters && candidate.voters[currentUser.uid]) {
-        return; // Abort, already voted
-      }
+      if (candidate.voters && candidate.voters[state.currentUser.uid]) return;
       return {
         count: (candidate.count || 0) + 1,
-        voters: { ...(candidate.voters || {}), [currentUser.uid]: true },
+        voters: { ...(candidate.voters || {}), [state.currentUser.uid]: true },
         text: candidate.text || text
       };
     });
 
     if (!result.committed) {
-      alert("You already voted this round.");
+      showToast("You already submitted this round.");
       return;
     }
 
-    hasVotedThisRound = true;
+    state.hasVotedThisRound = true;
     input.value = "";
+    set(ref(db, `sentence/participants/${state.currentUser.uid}`), true).catch((err) => console.error("Participant write failed:", err));
   } catch (err) {
-    alert("Submit failed: " + err.message);
+    showToast("Submit failed: " + err.message);
     console.error(err);
   }
+}
+
+// ——— UTILS ———
+function showToast(msg) {
+  dom.toast.textContent = msg;
+  dom.toast.classList.add("show");
+  setTimeout(() => dom.toast.classList.remove("show"), 3000);
 }
 </script>
 <style>
@@ -416,6 +453,30 @@ body {
   border-color: var(--text);
 }
 
+.connection-banner {
+  display: none;
+  font-size: 0.7rem;
+  padding: 6px 12px;
+  border-radius: 6px;
+  margin-bottom: 12px;
+  text-align: center;
+  font-weight: 500;
+}
+
+.connection-banner.connecting {
+  display: block;
+  background: rgba(240, 160, 40, 0.1);
+  color: #f0a040;
+  border: 1px solid rgba(240, 160, 40, 0.3);
+}
+
+.connection-banner.offline {
+  display: block;
+  background: rgba(220, 60, 60, 0.1);
+  color: #dc3c3c;
+  border: 1px solid rgba(220, 60, 60, 0.3);
+}
+
 .thread-area {
   flex: 1;
   display: flex;
@@ -500,7 +561,7 @@ body {
 }
 
 .inline-box input {
-  width: 100px;
+  width: 140px;
   background: transparent;
   border: none;
   border-bottom: 1px solid var(--accent);
@@ -644,6 +705,33 @@ body.light #about-overlay {
   margin-top: 12px;
   text-align: center;
 }
+
+#toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  background: linear-gradient(135deg, var(--bg-card-1) 0%, var(--bg-card-2) 100%);
+  border: 1px solid var(--border-input);
+  color: var(--text);
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  opacity: 0;
+  pointer-events: none;
+  transition: all 0.3s ease;
+  z-index: 200;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+
+#toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+body.light #toast {
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
 </style>
 </head>
 <body>
@@ -656,19 +744,21 @@ body.light #about-overlay {
 
     <div class="top-bar">
       <button id="theme-btn" class="icon-btn" title="Toggle dark/light">🔆</button>
-<button id="about-btn" class="icon-btn" title="About">?</button>
+      <button id="about-btn" class="icon-btn" title="About">?</button>
     </div>
   </div>
+
+  <div id="connection-banner" class="connection-banner">Connecting...</div>
 
   <div class="thread-area">
     <div class="message-bubble message-right">
       <div class="message-label">Anonymous User</div>
-      <div id="question" class="message-text">Give me a recipe of a breakfast meal for 2 I could cook with 2 eggs, bread and a sausage.</div>
+      <div id="question" class="message-text">Loading question...</div>
     </div>
 
     <div id="contributors" class="contributor-bar">0 votes cast</div>
     <div class="message-bubble message-left">
-      <span id="tokens"><div class="spinner"></div></span>
+      <span id="tokens"></span>
     </div>
     <div id="candidates-list" class="candidates-area"></div>
     <div id="status" class="cooldown-bar ready">Submit the next word</div>
@@ -686,6 +776,8 @@ body.light #about-overlay {
     <p>Large Language Human is an art project and a social experiement designed by Alex Polin. It emerged out of curiosity, if something like this can work.</p>
   </div>
 </div>
+
+<div id="toast"></div>
 
 </body>
 </html>

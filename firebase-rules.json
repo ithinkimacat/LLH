@@ -25,6 +25,12 @@
       "publishState": {
         ".read": true,
         ".write": "auth != null && (!newData.exists() || (newData.child('word').exists() && newData.child('timestamp').exists()))"
+      },
+      "participants": {
+        ".read": true,
+        "$uid": {
+          ".write": "auth.uid == $uid"
+        }
       }
     }
   }
