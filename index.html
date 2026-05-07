@@ -226,8 +226,7 @@ function renderCandidates(candidates) {
     const tag = document.createElement("span");
     tag.className = "candidate-tag";
     const pct = Math.min(100, Math.round((cand.count / state.threshold) * 100));
-    tag.style.background = `linear-gradient(90deg, var(--accent) ${pct}%, transparent ${pct}%)`;
-    tag.style.color = pct > 50 ? "var(--btn-text)" : "var(--text)";
+    tag.style.background = `linear-gradient(90deg, rgba(136,136,136,0.35) ${pct}%, rgba(136,136,136,0.05) ${pct}%)`;
     tag.textContent = `${cand.text || word} ${cand.count}/${state.threshold}`;
     dom.candidatesList.appendChild(tag);
   }
@@ -242,7 +241,7 @@ function updateStatus(candidates) {
 
   const entries = Object.entries(candidates);
   if (entries.length === 0) {
-    dom.status.textContent = "Submit the next word";
+    dom.status.textContent = "";
     dom.status.className = "cooldown-bar ready";
     return;
   }
@@ -739,7 +738,7 @@ body.light #toast {
   <div class="top-row">
     <div class="header-block">
       <h1>Large Language Human</h1>
-      <p class="subtitle">The first AI model running on Humans.</p>
+      <p class="subtitle">The first AI assistant powered entirely on human intelligence.</p>
     </div>
 
     <div class="top-bar">
