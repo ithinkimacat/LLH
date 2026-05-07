@@ -1,0 +1,9 @@
+  {                                                                                                                              
+    "sentence": {                                                                                                                
+      "question": "Your prompt",                                                                                                 
+      "threshold": 5,                                                                                                            
+      "words": {},                                                                                                               
+      "candidates": {},                                                                                                          
+      "publishState": null                                                                                                       
+    }                                                                                                                            
+  } 

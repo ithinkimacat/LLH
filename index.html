@@ -6,7 +6,7 @@
 <title>Large Language Human</title>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getDatabase, ref, onValue, push, set, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+import { getDatabase, ref, onValue, push, set, runTransaction, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
 const firebaseConfig = {
@@ -24,22 +24,15 @@ const db = getDatabase(app);
 const auth = getAuth(app);
 
 const sentenceRef = ref(db, "sentence");
-const tokensRef = ref(db, "sentence/tokens");
+const candidatesRef = ref(db, "sentence/candidates");
+const wordsRef = ref(db, "sentence/words");
+const publishStateRef = ref(db, "sentence/publishState");
 
 let currentUser = null;
-let userLastSubmit = 0;
-const COOLDOWN_MS = 5000;
-const authorColors = new Map();
-let previousTokenIds = new Set();
+let hasVotedThisRound = false;
+let threshold = 5;
+let previousWordIds = new Set();
 let hasLoaded = false;
-
-function getAuthorColor(uid) {
-  if (!authorColors.has(uid)) {
-    const lightness = 40 + Math.floor(Math.random() * 50);
-    authorColors.set(uid, `hsl(0, 0%, ${lightness}%)`);
-  }
-  return authorColors.get(uid);
-}
 
 signInAnonymously(auth).then((cred) => {
   currentUser = cred.user;
@@ -47,9 +40,9 @@ signInAnonymously(auth).then((cred) => {
 }).catch((err) => console.error("Auth failed", err));
 
 const questionEl = document.getElementById("question");
-const tokensEl = document.getElementById("tokens");
-const cooldownEl = document.getElementById("cooldown");
+const wordsEl = document.getElementById("tokens");
 const statusEl = document.getElementById("status");
+const candidatesListEl = document.getElementById("candidates-list");
 const contributorEl = document.getElementById("contributors");
 const themeBtn = document.getElementById("theme-btn");
 const aboutBtn = document.getElementById("about-btn");
@@ -81,127 +74,209 @@ aboutOverlay.addEventListener("click", (e) => {
 onValue(sentenceRef, (snapshot) => {
   const data = snapshot.val() || {};
   questionEl.textContent = data.question || "Give me a recipe of a breakfast meal for 2 I could cook with 2 eggs, bread and a sausage.";
-  renderTokens(data.tokens || {});
-  if (data.lastSubmit) {
-    userLastSubmit = data.lastSubmit[currentUser?.uid] || 0;
-    updateCooldown();
+  threshold = data.threshold || 5;
+
+  const candidates = data.candidates || {};
+  const words = data.words || {};
+
+  // Check if user already voted this round
+  hasVotedThisRound = false;
+  for (const cand of Object.values(candidates)) {
+    if (cand.voters && cand.voters[currentUser?.uid]) {
+      hasVotedThisRound = true;
+      break;
+    }
   }
+
+  // If candidates cleared (new round), reset vote flag visually
+  if (Object.keys(candidates).length === 0 && hasVotedThisRound) {
+    hasVotedThisRound = false;
+  }
+
+  renderWords(words);
+  renderCandidates(candidates);
+  checkAndPublish(candidates, data.publishState);
+  updateStatus(candidates);
 });
 
-function renderTokens(tokensObj) {
-  tokensEl.innerHTML = "";
-  const entries = Object.entries(tokensObj).sort((a, b) => (a[1].timestamp || 0) - (b[1].timestamp || 0));
+function renderWords(wordsObj) {
+  wordsEl.innerHTML = "";
+  const entries = Object.entries(wordsObj).sort((a, b) => (a[1].timestamp || 0) - (b[1].timestamp || 0));
 
-  const uniqueAuthors = new Set(entries.map(([, t]) => t.authorId));
-  contributorEl.textContent = uniqueAuthors.size + " contributor" + (uniqueAuthors.size !== 1 ? "s" : "");
+  let totalContributors = 0;
+  const currentIds = new Set();
 
   if (entries.length === 0 && !hasLoaded) {
-    tokensEl.innerHTML = '<div class="spinner"></div>';
+    wordsEl.innerHTML = '<div class="spinner"></div>';
     hasLoaded = true;
     appendInlineInput();
+    contributorEl.textContent = "0 contributors";
     return;
   }
   hasLoaded = true;
 
-  const currentIds = new Set();
-  for (const [id, token] of entries) {
+  for (const [id, word] of entries) {
     currentIds.add(id);
-    const span = document.createElement("span");
-    span.className = "token";
-    if (!previousTokenIds.has(id)) {
-      span.classList.add("token-flash");
-      setTimeout(() => span.classList.remove("token-flash"), 500);
-    }
-    span.textContent = token.text;
-    span.style.color = getAuthorColor(token.authorId);
-    span.title = "Author: " + token.authorId.slice(0, 6);
-    tokensEl.appendChild(span);
-  }
-  previousTokenIds = currentIds;
+    totalContributors += word.authorCount || 1;
 
-  if (entries.length === 0) {
-    const placeholder = document.createElement("span");
-    placeholder.className = "placeholder";
-    placeholder.textContent = "";
-    tokensEl.appendChild(placeholder);
+    const span = document.createElement("span");
+    span.className = "word";
+    if (!previousWordIds.has(id)) {
+      span.classList.add("word-flash");
+      setTimeout(() => span.classList.remove("word-flash"), 600);
+    }
+    span.textContent = word.text;
+    wordsEl.appendChild(span);
+
+    // Add space after word
+    const space = document.createElement("span");
+    space.textContent = " ";
+    wordsEl.appendChild(space);
   }
+  previousWordIds = currentIds;
+
+  contributorEl.textContent = totalContributors + " votes cast";
 
   appendInlineInput();
 }
 
 function appendInlineInput() {
+  // Remove existing inline box if any
+  const existing = wordsEl.querySelector(".inline-box");
+  if (existing) existing.remove();
+
   const wrapper = document.createElement("span");
   wrapper.className = "inline-box";
   wrapper.innerHTML = `
-    <input type="text" id="token-input" maxlength="3" placeholder="..." autocomplete="off">
-    <button id="submit-btn">→</button>
+    <input type="text" id="token-input" maxlength="20" placeholder="${hasVotedThisRound ? 'Wait for next round...' : 'Type a word...'}" autocomplete="off" ${hasVotedThisRound ? 'disabled' : ''}>
+    <button id="submit-btn" ${hasVotedThisRound ? 'disabled' : ''}>→</button>
   `;
-  tokensEl.appendChild(wrapper);
+  wordsEl.appendChild(wrapper);
 
-  // Re-bind to new elements
   const newInput = wrapper.querySelector("#token-input");
   const newBtn = wrapper.querySelector("#submit-btn");
 
-  newInput.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") submitToken();
-  });
-  newBtn.addEventListener("click", submitToken);
-
-  // Focus input if not on cooldown
-  const now = Date.now();
-  if (now - userLastSubmit >= COOLDOWN_MS) {
+  if (!hasVotedThisRound) {
+    newInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") submitWord();
+    });
+    newBtn.addEventListener("click", submitWord);
     setTimeout(() => newInput.focus(), 10);
   }
 }
 
-function updateCooldown() {
-  const now = Date.now();
-  const elapsed = now - userLastSubmit;
-  const remaining = Math.max(0, Math.ceil((COOLDOWN_MS - elapsed) / 1000));
-  if (remaining > 0) {
-    statusEl.textContent = "Cooldown: " + remaining + "s";
-    statusEl.className = "cooldown-bar cooling";
-    cooldownEl.textContent = "";
-  } else {
-    statusEl.textContent = "Ready — add the next 2-3 letters";
-    statusEl.className = "cooldown-bar ready";
-    cooldownEl.textContent = "";
+function renderCandidates(candidates) {
+  candidatesListEl.innerHTML = "";
+  const entries = Object.entries(candidates).sort((a, b) => b[1].count - a[1].count);
+  if (entries.length === 0) return;
+
+  const label = document.createElement("div");
+  label.className = "candidates-label";
+  label.textContent = "Voting:";
+  candidatesListEl.appendChild(label);
+
+  for (const [word, cand] of entries) {
+    const tag = document.createElement("span");
+    tag.className = "candidate-tag";
+    const pct = Math.min(100, Math.round((cand.count / threshold) * 100));
+    tag.style.background = `linear-gradient(90deg, var(--accent) ${pct}%, transparent ${pct}%)`;
+    tag.style.color = pct > 50 ? "var(--btn-text)" : "var(--text)";
+    tag.textContent = `${cand.text || word} ${cand.count}/${threshold}`;
+    candidatesListEl.appendChild(tag);
   }
 }
 
-setInterval(updateCooldown, 500);
+function updateStatus(candidates) {
+  if (hasVotedThisRound) {
+    statusEl.textContent = "Predition submitted — waiting for consensus...";
+    statusEl.className = "cooldown-bar cooling";
+    return;
+  }
 
-function validateToken(text) {
-  if (!text || text.length < 2 || text.length > 3) return "Token must be 2-3 characters.";
+  const entries = Object.entries(candidates);
+  if (entries.length === 0) {
+    statusEl.textContent = "Submit the next word";
+    statusEl.className = "cooldown-bar ready";
+    return;
+  }
+
+  const top = entries.sort((a, b) => b[1].count - a[1].count)[0];
+  statusEl.textContent = `Leading: "${top[1].text || top[0]}" with ${top[1].count} votes`;
+  statusEl.className = "cooldown-bar ready";
+}
+
+function checkAndPublish(candidates, publishState) {
+  if (publishState) return; // Someone already publishing
+
+  for (const [word, cand] of Object.entries(candidates)) {
+    if (cand.count >= threshold) {
+      // Race to publish
+      runTransaction(publishStateRef, (state) => {
+        if (!state) {
+          return { word: word, text: cand.text || word, timestamp: Date.now() };
+        }
+        return state;
+      }).then((result) => {
+        if (result.committed && result.snapshot.val()?.word === word) {
+          // We won the race
+          push(wordsRef, {
+            text: cand.text || word,
+            timestamp: serverTimestamp(),
+            authorCount: cand.count
+          });
+          set(candidatesRef, null);
+          set(publishStateRef, null);
+        }
+      }).catch((err) => console.error("Publish race failed", err));
+      return; // Only process one candidate per cycle
+    }
+  }
+}
+
+function validateWord(text) {
+  if (!text || text.length < 1 || text.length > 20) return "Word must be 1-20 characters.";
+  if (!/^\S+$/.test(text)) return "Word must not contain spaces.";
   return null;
 }
 
-async function submitToken() {
+async function submitWord() {
   const input = document.getElementById("token-input");
   const text = input.value.trim();
-  const error = validateToken(text);
+  const error = validateWord(text);
   if (error) { alert(error); return; }
   if (!currentUser) { alert("Not authenticated yet. Wait a moment."); return; }
+  if (hasVotedThisRound) { alert("You already voted this round. Wait for the next word to be published."); return; }
 
-  const now = Date.now();
-  if (now - userLastSubmit < COOLDOWN_MS) { alert(`Cooldown: wait ${Math.ceil((COOLDOWN_MS - (now - userLastSubmit))/1000)}s`); return; }
+  const word = text.toLowerCase();
+  const candidateRef = ref(db, `sentence/candidates/${word}`);
 
   try {
-    const newTokenRef = push(tokensRef);
-    await set(newTokenRef, {
-      text: text,
-      authorId: currentUser.uid,
-      timestamp: serverTimestamp()
+    const result = await runTransaction(candidateRef, (candidate) => {
+      if (!candidate) {
+        return { count: 1, voters: { [currentUser.uid]: true }, text: text };
+      }
+      if (candidate.voters && candidate.voters[currentUser.uid]) {
+        return; // Abort, already voted
+      }
+      return {
+        count: (candidate.count || 0) + 1,
+        voters: { ...(candidate.voters || {}), [currentUser.uid]: true },
+        text: candidate.text || text
+      };
     });
-    await set(ref(db, `sentence/lastSubmit/${currentUser.uid}`), now);
-    userLastSubmit = now;
-    updateCooldown();
+
+    if (!result.committed) {
+      alert("You already voted this round.");
+      return;
+    }
+
+    hasVotedThisRound = true;
+    input.value = "";
   } catch (err) {
     alert("Submit failed: " + err.message);
     console.error(err);
   }
 }
-
 </script>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -263,6 +338,31 @@ body {
   padding: 16px;
 }
 
+.top-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 0 16px;
+}
+
+.header-block {
+  text-align: left;
+}
+
+.header-block h1 {
+  font-size: 1.1rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+
+.subtitle {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+
 .top-bar {
   display: flex;
   justify-content: flex-end;
@@ -287,31 +387,6 @@ body {
 .icon-btn:hover {
   color: var(--text);
   border-color: var(--text);
-}
-
-.top-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0 0 16px;
-}
-
-.header-block {
-  text-align: left;
-}
-
-.header-block h1 {
-  font-size: 1.1rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text);
-  margin-bottom: 6px;
-}
-
-.subtitle {
-  font-size: 0.8rem;
-  color: var(--text-dim);
 }
 
 .thread-area {
@@ -372,17 +447,17 @@ body {
   display: inline;
 }
 
-.token {
+.word {
   padding: 0;
   border-radius: 0;
   cursor: default;
   transition: background 0.2s;
 }
 
-.token:hover { background: var(--token-hover); }
+.word:hover { background: var(--token-hover); }
 
-.token-flash {
-  animation: flash 0.5s ease-out;
+.word-flash {
+  animation: flash 0.6s ease-out;
 }
 
 @keyframes flash {
@@ -398,7 +473,7 @@ body {
 }
 
 .inline-box input {
-  width: 48px;
+  width: 100px;
   background: transparent;
   border: none;
   border-bottom: 1px solid var(--accent);
@@ -406,7 +481,7 @@ body {
   font-family: var(--font-mono);
   font-size: 1.05rem;
   outline: none;
-  text-align: center;
+  text-align: left;
   padding: 0 2px;
 }
 
@@ -436,14 +511,40 @@ body {
 }
 
 .cooldown-bar {
-  margin-top: 10px;
+  margin-top: 4px;
   font-size: 0.75rem;
-  text-align: right;
+  text-align: left;
   font-weight: 500;
 }
 
 .cooldown-bar.ready { color: var(--text-dim); }
 .cooldown-bar.cooling { color: var(--text); }
+
+.candidates-area {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-top: 4px;
+  min-height: 28px;
+}
+
+.candidates-label {
+  font-size: 0.65rem;
+  color: var(--text-meta);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-right: 4px;
+}
+
+.candidate-tag {
+  font-size: 0.75rem;
+  padding: 3px 10px;
+  border-radius: 12px;
+  border: 1px solid var(--border-input);
+  font-weight: 500;
+  transition: all 0.2s;
+}
 
 .spinner {
   width: 20px;
@@ -523,11 +624,11 @@ body.light #about-overlay {
   <div class="top-row">
     <div class="header-block">
       <h1>Large Language Human</h1>
-      <p class="subtitle">Add the next 2-3 letters. Cooldown: 5s.</p>
+      <p class="subtitle">The first AI model running on Humans.</p>
     </div>
 
     <div class="top-bar">
-      <button id="theme-btn" class="icon-btn" title="Toggle dark/light">🔅</button>
+      <button id="theme-btn" class="icon-btn" title="Toggle dark/light">🔆</button>
 <button id="about-btn" class="icon-btn" title="About">?</button>
     </div>
   </div>
@@ -538,12 +639,12 @@ body.light #about-overlay {
       <div id="question" class="message-text">Give me a recipe of a breakfast meal for 2 I could cook with 2 eggs, bread and a sausage.</div>
     </div>
 
-    <div id="contributors" class="contributor-bar">0 contributors</div>
+    <div id="contributors" class="contributor-bar">0 votes cast</div>
     <div class="message-bubble message-left">
       <span id="tokens"><div class="spinner"></div></span>
     </div>
-    <div id="status" class="cooldown-bar ready">Ready — add the next 2-3 letters</div>
-    <span id="cooldown"></span>
+    <div id="candidates-list" class="candidates-area"></div>
+    <div id="status" class="cooldown-bar ready">Submit the next word</div>
   </div>
 
   <div class="user-meta">

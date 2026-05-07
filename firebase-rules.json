@@ -5,18 +5,26 @@
       "question": {
         ".write": false
       },
-      "tokens": {
+      "threshold": {
         ".read": true,
-        "$tokenId": {
-          ".write": "auth != null && newData.child('authorId').val() == auth.uid && newData.child('text').val().length >= 2 && newData.child('text').val().length <= 3 && newData.child('timestamp').exists()",
-          ".validate": "!data.exists()"
+        ".write": false
+      },
+      "words": {
+        ".read": true,
+        "$wordId": {
+          ".write": "auth != null && newData.child('text').exists() && newData.child('timestamp').exists() && newData.child('authorCount').exists()"
         }
       },
-      "lastSubmit": {
+      "candidates": {
         ".read": true,
-        "$uid": {
-          ".write": "auth.uid == $uid && (!data.exists() || newData.val() > data.val() + 5000)"
+        ".write": "auth != null",
+        "$word": {
+          ".write": "auth != null && newData.child('voters').child(auth.uid).exists() && (!data.exists() || !data.child('voters').child(auth.uid).exists()) && newData.child('count').exists()"
         }
+      },
+      "publishState": {
+        ".read": true,
+        ".write": "auth != null && (!newData.exists() || (newData.child('word').exists() && newData.child('timestamp').exists()))"
       }
     }
   }
