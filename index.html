@@ -188,7 +188,7 @@ function renderCandidates(candidates) {
 
 function updateStatus(candidates) {
   if (hasVotedThisRound) {
-    statusEl.textContent = "Predition submitted — waiting for consensus...";
+    statusEl.textContent = "Prediction submitted — waiting for consensus...";
     statusEl.className = "cooldown-bar cooling";
     return;
   }
@@ -206,29 +206,33 @@ function updateStatus(candidates) {
 }
 
 function checkAndPublish(candidates, publishState) {
-  if (publishState) return; // Someone already publishing
+  if (publishState) return;
 
   for (const [word, cand] of Object.entries(candidates)) {
     if (cand.count >= threshold) {
-      // Race to publish
       runTransaction(publishStateRef, (state) => {
         if (!state) {
-          return { word: word, text: cand.text || word, timestamp: Date.now() };
+          return { word: word, text: cand.text || word, timestamp: Date.now(), winner: currentUser.uid };
         }
         return state;
-      }).then((result) => {
-        if (result.committed && result.snapshot.val()?.word === word) {
-          // We won the race
-          push(wordsRef, {
-            text: cand.text || word,
-            timestamp: serverTimestamp(),
-            authorCount: cand.count
-          });
-          set(candidatesRef, null);
-          set(publishStateRef, null);
+      }).then(async (result) => {
+        const val = result.snapshot.val();
+        if (result.committed && val && val.winner === currentUser.uid) {
+          try {
+            const newWordRef = push(wordsRef);
+            await set(newWordRef, {
+              text: val.text,
+              timestamp: serverTimestamp(),
+              authorCount: cand.count
+            });
+            await set(candidatesRef, null);
+            await set(publishStateRef, null);
+          } catch (err) {
+            console.error("Publish cleanup failed", err);
+          }
         }
       }).catch((err) => console.error("Publish race failed", err));
-      return; // Only process one candidate per cycle
+      return;
     }
   }
 }
