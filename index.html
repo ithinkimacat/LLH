@@ -233,14 +233,14 @@ function renderCandidates(candidates) {
     dom.candidatesList.appendChild(tag);
   }
 
-  const deleteCand = candidates['__delete__'];
-  const deleteTag = document.createElement("span");
-  deleteTag.className = "candidate-tag delete-tag";
-  const dpct = Math.min(100, Math.round(((deleteCand?.count || 0) / state.threshold) * 100));
-  deleteTag.style.background = `linear-gradient(90deg, rgba(220,60,60,0.35) ${dpct}%, rgba(220,60,60,0.05) ${dpct}%)`;
-  deleteTag.textContent = `Delete last word ${deleteCand?.count || 0}/${state.threshold}`;
-  deleteTag.addEventListener("click", () => voteToDelete());
-  dom.candidatesList.appendChild(deleteTag);
+///  const deleteCand = candidates['__delete__'];
+///  const deleteTag = document.createElement("span");
+///  deleteTag.className = "candidate-tag delete-tag";
+///  const dpct = Math.min(100, Math.round(((deleteCand?.count || 0) / state.threshold) * 100));
+///  deleteTag.style.background = `linear-gradient(90deg, rgba(220,60,60,0.35) ${dpct}%, rgba(220,60,60,0.05) ${dpct}%)`;
+///  deleteTag.textContent = `Delete last word ${deleteCand?.count || 0}/${state.threshold}`;
+///  deleteTag.addEventListener("click", () => voteToDelete());
+///  dom.candidatesList.appendChild(deleteTag);
 }
 
 function updateStatus(candidates) {
