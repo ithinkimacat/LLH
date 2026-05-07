@@ -12,7 +12,7 @@
       "words": {
         ".read": true,
         "$wordId": {
-          ".write": "auth != null && newData.child('text').exists() && newData.child('timestamp').exists() && newData.child('authorCount').exists()"
+          ".write": "auth != null && (!newData.exists() || (newData.child('text').exists() && newData.child('timestamp').exists() && newData.child('authorCount').exists()))"
         }
       },
       "candidates": {
