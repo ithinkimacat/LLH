@@ -1,0 +1,23 @@
+{
+  "rules": {
+    "sentence": {
+      ".read": true,
+      "question": {
+        ".write": false
+      },
+      "tokens": {
+        ".read": true,
+        "$tokenId": {
+          ".write": "auth != null && newData.child('authorId').val() == auth.uid && newData.child('text').val().length >= 2 && newData.child('text').val().length <= 3 && newData.child('timestamp').exists()",
+          ".validate": "!data.exists()"
+        }
+      },
+      "lastSubmit": {
+        ".read": true,
+        "$uid": {
+          ".write": "auth.uid == $uid && (!data.exists() || newData.val() > data.val() + 5000)"
+        }
+      }
+    }
+  }
+}
