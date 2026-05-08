@@ -232,10 +232,10 @@ function renderCandidates(candidates) {
     tag.className = "candidate-tag";
     const isUserVote = cand.voters && cand.voters[state.currentUser?.uid];
     if (isUserVote) tag.classList.add("voted");
+    else if (state.hasVotedThisRound) tag.classList.add("dimmed");
     const pct = Math.min(100, Math.round((cand.count / state.threshold) * 100));
-    tag.style.background = `linear-gradient(90deg, rgba(136,136,136,0.35) ${pct}%, rgba(136,136,136,0.05) ${pct}%)`;
-    const wordText = isUserVote ? `&#10003; ${cand.text || word}` : (cand.text || word);
-    tag.innerHTML = `${wordText} <sup class="tag-count">${cand.count}/${state.threshold}</sup>`;
+    if (!isUserVote) tag.style.background = `linear-gradient(90deg, rgba(136,136,136,0.35) ${pct}%, rgba(136,136,136,0.05) ${pct}%)`;
+    tag.innerHTML = `${cand.text || word} <sup class="tag-count">${cand.count}/${state.threshold}</sup>`;
     tag.addEventListener("click", () => isUserVote ? cancelVote(word) : voteForWord(cand.text || word));
     dom.candidatesList.appendChild(tag);
   }
@@ -245,17 +245,17 @@ function renderCandidates(candidates) {
   deleteTag.className = "candidate-tag delete-tag";
   const isUserDeleteVote = deleteCand?.voters && deleteCand.voters[state.currentUser?.uid];
   if (isUserDeleteVote) deleteTag.classList.add("voted");
+  else if (state.hasVotedThisRound) deleteTag.classList.add("dimmed");
   const dpct = Math.min(100, Math.round(((deleteCand?.count || 0) / state.threshold) * 100));
-  deleteTag.style.background = `linear-gradient(90deg, rgba(220,60,60,0.35) ${dpct}%, rgba(220,60,60,0.05) ${dpct}%)`;
-  const deleteText = isUserDeleteVote ? "&#10003; Delete last word" : "Delete last word";
-  deleteTag.innerHTML = `${deleteText} <sup class="tag-count">${deleteCand?.count || 0}/${state.threshold}</sup>`;
+  if (!isUserDeleteVote) deleteTag.style.background = `linear-gradient(90deg, rgba(220,60,60,0.35) ${dpct}%, rgba(220,60,60,0.05) ${dpct}%)`;
+  deleteTag.innerHTML = `Delete last word <sup class="tag-count">${deleteCand?.count || 0}/${state.threshold}</sup>`;
   deleteTag.addEventListener("click", () => isUserDeleteVote ? cancelVote('__delete__') : voteToDelete());
   dom.candidatesList.appendChild(deleteTag);
 }
 
 function updateStatus(candidates) {
   if (state.hasVotedThisRound) {
-    dom.status.textContent = "Prediction submitted — click your vote to cancel";
+    dom.status.textContent = "Prediction submitted! You can click your vote to cancel it.";
     dom.status.className = "cooldown-bar cooling";
     return;
   }
@@ -771,7 +771,10 @@ body {
   transition: all 0.2s;
   cursor: pointer;
 }
-.candidate-tag:hover {
+.candidate-tag.dimmed {
+  opacity: 0.5;
+}
+.candidate-tag.dimmed:hover {
   opacity: 0.75;
 }
 .candidate-tag.delete-tag {
@@ -779,8 +782,12 @@ body {
   border-color: rgba(220, 60, 60, 0.5);
 }
 .candidate-tag.voted {
-  border-left: 3px solid var(--text);
-  padding-left: 8px;
+  background: var(--text);
+  color: var(--bg-1);
+  border-color: var(--text);
+}
+.candidate-tag.voted .tag-count {
+  color: var(--bg-1);
 }
 .tag-count {
   font-size: 0.55rem;
