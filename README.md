@@ -1,82 +1,42 @@
 # Large Language Human
 
+**The first AI assistant powered entirely by human intelligence.**
+
 A social experiment where visitors collectively construct a sentence, one word at a time, through consensus voting. When enough people vote for the same word, it gets published and the next round begins.
-
-## Architecture
-
-- **Frontend**: Static HTML/CSS/JS served by GitHub Pages
-- **Backend**: Firebase Realtime Database + Anonymous Auth
-- **Consensus**: Client-side `runTransaction` race-lock — when a candidate reaches threshold, all clients race to publish; one wins, queue clears
-- **Real-time**: Firebase `onValue` listeners update all clients instantly
 
 ## How It Works
 
-1. Visitor anonymously authenticates via Firebase
-2. Submits a word (1-20 characters) as a vote
-3. Word appears as a candidate. Others can vote for the same word (case-insensitive)
-4. When a candidate reaches the threshold (default: 5 unique voters), it auto-publishes to the sentence
-5. Queue clears. Everyone can vote for the next word
+1. Visit [largelanguagehuman.com](https://largelanguagehuman.com)
+2. Read the prompt and submit a word
+3. Your word appears as a candidate — others can vote for it
+4. When a candidate reaches the threshold (default: 5 votes), it auto-publishes
+5. Queue clears. Everyone votes for the next word
 
-## Setup
+## Tech Stack
 
-1. **Create Firebase project**
-   - Go to [Firebase Console](https://console.firebase.google.com)
-   - Create project, enable Realtime Database, enable Anonymous Auth
+- **Frontend**: Static HTML/CSS/JS on GitHub Pages
+- **Backend**: Firebase Realtime Database + Anonymous Auth
+- **Consensus**: Client-side `runTransaction` race-lock
+- **Real-time**: Firebase `onValue` listeners
 
-2. **Apply security rules**
-   - In Database Rules, paste contents of `firebase-rules.json`
+## Features
 
-3. **Get config**
-   - Project Settings → General → Your apps → Web app
-   - Copy config object
-
-4. **Plug config into app**
-   - Open `index.html`
-   - Replace the `firebaseConfig` object with your real values (already done if you see real keys)
-
-5. **Deploy to GitHub Pages**
-   - Push repo to GitHub
-   - Settings → Pages → Source: deploy from branch `main`, folder `/` (root)
-
-6. **Set question and threshold**
-   - In Firebase console, Realtime Database → Data tab
-   - Add:
-     ```json
-     {
-       "sentence": {
-         "question": "Your prompt here",
-         "threshold": 5,
-         "words": {},
-         "candidates": {},
-         "publishState": null
-       }
-     }
-     ```
-   - Update `question` and `threshold` anytime without redeploying
-
-## Database Structure
-
-```
-sentence/
-  question: "Your prompt here"
-  threshold: 5
-  words/
-    -Nabc...: { text: "hello", timestamp: ServerValue, authorCount: 5 }
-  candidates/
-    hello: { count: 3, voters: { uid1: true, uid2: true, uid3: true }, text: "Hello" }
-  publishState: { word: "hello", text: "Hello", timestamp: 12345 }
-```
-
-## Security Rules Summary
-
-- `words`: authenticated users only, requires text + timestamp + authorCount
-- `candidates`: authenticated users only, one vote per user per word, no duplicate voters
-- `publishState`: authenticated users only, used for race-lock publishing
-- `question` / `threshold`: admin only (set manually in console)
+- Anonymous auth — no signup required
+- Real-time candidate voting with live vote counts
+- Click any candidate to vote, click again to cancel
+- Delete-last-word consensus button
+- Dark/light theme toggle
+- Connection status indicator
+- Persistent participant counter
 
 ## Local Testing
 
 ```bash
 python3 -m http.server 8000
 ```
+
 Open http://localhost:8000
+
+## Created by
+
+Alex Polin — [LinkedIn](https://www.linkedin.com/in/alex-polin/)

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0a0a0a"/>
+      <stop offset="100%" stop-color="#1a1a1a"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <text x="600" y="260" font-family="'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif" font-size="72" font-weight="700" fill="#f0f0f0" text-anchor="middle">Large Language Human</text>
+  <text x="600" y="340" font-family="'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif" font-size="28" font-weight="400" fill="#888" text-anchor="middle">The first AI assistant powered entirely by human intelligence.</text>
+  <circle cx="600" cy="460" r="40" fill="none" stroke="#f0f0f0" stroke-width="3"/>
+  <text x="600" y="472" font-family="'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif" font-size="36" font-weight="700" fill="#f0f0f0" text-anchor="middle">L</text>
+</svg>
