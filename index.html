@@ -105,7 +105,7 @@ function updateConnectionUI() {
 }
 
 // ——— DATA LISTENER ———
-onValue(sentenceRef, (snapshot) => {
+onValue(sentenceRef, async (snapshot) => {
   const data = snapshot.val() || {};
   state.dataLoaded = true;
   state.threshold = data.threshold || 5;
@@ -233,14 +233,14 @@ function renderCandidates(candidates) {
     dom.candidatesList.appendChild(tag);
   }
 
-///  const deleteCand = candidates['__delete__'];
-///  const deleteTag = document.createElement("span");
-///  deleteTag.className = "candidate-tag delete-tag";
-///  const dpct = Math.min(100, Math.round(((deleteCand?.count || 0) / state.threshold) * 100));
-///  deleteTag.style.background = `linear-gradient(90deg, rgba(220,60,60,0.35) ${dpct}%, rgba(220,60,60,0.05) ${dpct}%)`;
-///  deleteTag.textContent = `Delete last word ${deleteCand?.count || 0}/${state.threshold}`;
-///  deleteTag.addEventListener("click", () => voteToDelete());
-///  dom.candidatesList.appendChild(deleteTag);
+  const deleteCand = candidates['__delete__'];
+  const deleteTag = document.createElement("span");
+  deleteTag.className = "candidate-tag delete-tag";
+  const dpct = Math.min(100, Math.round(((deleteCand?.count || 0) / state.threshold) * 100));
+  deleteTag.style.background = `linear-gradient(90deg, rgba(220,60,60,0.35) ${dpct}%, rgba(220,60,60,0.05) ${dpct}%)`;
+  deleteTag.textContent = `Delete last word ${deleteCand?.count || 0}/${state.threshold}`;
+  deleteTag.addEventListener("click", () => voteToDelete());
+  dom.candidatesList.appendChild(deleteTag);
 }
 
 function updateStatus(candidates) {
@@ -264,11 +264,11 @@ function updateStatus(candidates) {
 }
 
 // ——— CONSENSUS PUBLISH ———
-function checkAndPublish(candidates, publishState, words) {
+async function checkAndPublish(candidates, publishState, words) {
   if (state.isPublishing) return;
   if (publishState && publishState.timestamp && Date.now() - publishState.timestamp < 10000) return;
   if (publishState && publishState.timestamp && Date.now() - publishState.timestamp >= 10000) {
-    set(publishStateRef, null).catch(() => {});
+    await set(publishStateRef, null).catch(() => {});
   }
 
   const existingTexts = new Set(Object.values(words || {}).map((w) => w.text?.toLowerCase()));
@@ -283,15 +283,15 @@ function checkAndPublish(candidates, publishState, words) {
       const lastId = wordEntries[wordEntries.length - 1][0];
 
       state.isPublishing = true;
-      runTransaction(publishStateRef, (s) => {
-        if (!s) return { word, text: "Delete last word", timestamp: Date.now(), winner: state.currentUser.uid };
-        return s;
-      }).then(async (result) => {
-        state.isPublishing = false;
+      try {
+        const result = await runTransaction(publishStateRef, (s) => {
+          if (!s) return { word, text: "Delete last word", timestamp: Date.now(), winner: state.currentUser.uid, targetId: lastId };
+          return s;
+        });
         const val = result.snapshot.val();
         if (result.committed && val && val.winner === state.currentUser.uid) {
           try {
-            await set(ref(db, `sentence/words/${lastId}`), null);
+            await set(ref(db, `sentence/words/${val.targetId || lastId}`), null);
             await set(candidatesRef, null);
             await set(publishStateRef, null);
           } catch (err) {
@@ -299,23 +299,24 @@ function checkAndPublish(candidates, publishState, words) {
             set(publishStateRef, null).catch(() => {});
           }
         }
-      }).catch((err) => {
-        state.isPublishing = false;
+      } catch (err) {
         console.error("Delete race failed", err);
         set(publishStateRef, null).catch(() => {});
-      });
+      } finally {
+        state.isPublishing = false;
+      }
       return;
     }
 
-    if (word === '__delete__' || existingTexts.has(word.toLowerCase())) continue;
+    if (existingTexts.has(word.toLowerCase())) continue;
     if (!state.currentUser) return;
 
     state.isPublishing = true;
-    runTransaction(publishStateRef, (s) => {
-      if (!s) return { word, text: cand.text || word, timestamp: Date.now(), winner: state.currentUser.uid };
-      return s;
-    }).then(async (result) => {
-      state.isPublishing = false;
+    try {
+      const result = await runTransaction(publishStateRef, (s) => {
+        if (!s) return { word, text: cand.text || word, timestamp: Date.now(), winner: state.currentUser.uid };
+        return s;
+      });
       const val = result.snapshot.val();
       if (result.committed && val && val.winner === state.currentUser.uid) {
         try {
@@ -328,11 +329,12 @@ function checkAndPublish(candidates, publishState, words) {
           set(publishStateRef, null).catch(() => {});
         }
       }
-    }).catch((err) => {
-      state.isPublishing = false;
+    } catch (err) {
       console.error("Publish race failed", err);
       set(publishStateRef, null).catch(() => {});
-    });
+    } finally {
+      state.isPublishing = false;
+    }
     return;
   }
 }
