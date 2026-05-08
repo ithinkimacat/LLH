@@ -19,7 +19,11 @@
         ".read": true,
         ".write": "auth != null",
         "$word": {
-          ".write": "auth != null && newData.child('voters').child(auth.uid).exists() && (!data.exists() || !data.child('voters').child(auth.uid).exists()) && newData.child('count').exists()"
+          ".write": "auth != null && (
+            (newData.child('voters').child(auth.uid).exists() && (!data.exists() || !data.child('voters').child(auth.uid).exists()) && newData.child('count').exists()) ||
+            (data.exists() && data.child('voters').child(auth.uid).exists() && !newData.child('voters').child(auth.uid).exists() && newData.child('count').val() == data.child('count').val() - 1) ||
+            (!newData.exists() && data.exists() && data.child('voters').child(auth.uid).exists())
+          )"
         }
       },
       "publishState": {
