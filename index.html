@@ -228,7 +228,7 @@ function renderCandidates(candidates) {
     tag.className = "candidate-tag";
     const pct = Math.min(100, Math.round((cand.count / state.threshold) * 100));
     tag.style.background = `linear-gradient(90deg, rgba(136,136,136,0.35) ${pct}%, rgba(136,136,136,0.05) ${pct}%)`;
-    tag.innerHTML = `<span class="tag-word">${cand.text || word}</span><span class="tag-count">${cand.count}/${state.threshold}</span>`;
+    tag.innerHTML = `${cand.text || word}<sup class="tag-count">${cand.count}/${state.threshold}</sup>`;
     tag.addEventListener("click", () => voteForWord(cand.text || word));
     dom.candidatesList.appendChild(tag);
   }
@@ -238,7 +238,7 @@ function renderCandidates(candidates) {
   deleteTag.className = "candidate-tag delete-tag";
   const dpct = Math.min(100, Math.round(((deleteCand?.count || 0) / state.threshold) * 100));
   deleteTag.style.background = `linear-gradient(90deg, rgba(220,60,60,0.35) ${dpct}%, rgba(220,60,60,0.05) ${dpct}%)`;
-  deleteTag.innerHTML = `<span class="tag-word">Delete last word</span><span class="tag-count">${deleteCand?.count || 0}/${state.threshold}</span>`;
+  deleteTag.innerHTML = `Delete last word<sup class="tag-count">${deleteCand?.count || 0}/${state.threshold}</sup>`;
   deleteTag.addEventListener("click", () => voteToDelete());
   dom.candidatesList.appendChild(deleteTag);
 }
@@ -731,11 +731,6 @@ body {
   font-weight: 500;
   transition: all 0.2s;
   cursor: pointer;
-  display: inline-flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  min-width: 130px;
 }
 .candidate-tag:hover {
   opacity: 0.75;
@@ -745,9 +740,10 @@ body {
   border-color: rgba(220, 60, 60, 0.5);
 }
 .tag-count {
-  font-size: 0.65rem;
+  font-size: 0.55rem;
+  vertical-align: super;
+  margin-left: 2px;
   color: var(--text-meta);
-  font-weight: 400;
 }
 
 .spinner {
