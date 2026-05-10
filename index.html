@@ -314,10 +314,8 @@ async function checkAndPublish(candidates, publishState, words) {
           try {
             await set(ref(db, `sentence/words/${val.targetId || lastId}`), null);
             await set(candidatesRef, null);
-            await set(publishStateRef, null);
           } catch (err) {
             console.error("Delete cleanup failed", err);
-            set(publishStateRef, null).catch(() => {});
           }
         }
       } catch (err) {
@@ -344,10 +342,8 @@ async function checkAndPublish(candidates, publishState, words) {
           const newWordRef = push(wordsRef);
           await set(newWordRef, { text: val.text, timestamp: serverTimestamp(), authorCount: cand.count });
           await set(candidatesRef, null);
-          await set(publishStateRef, null);
         } catch (err) {
           console.error("Publish cleanup failed", err);
-          set(publishStateRef, null).catch(() => {});
         }
       }
     } catch (err) {
@@ -953,7 +949,7 @@ body.light #toast {
   </div>
 </div>
 
-<div class="copyright">Created by Alex Polin</div>
+<div class="copyright">Version: 0.1.31 — Created by Alex Polin</div>
 
 <div id="about-overlay">
   <div id="about-card">
